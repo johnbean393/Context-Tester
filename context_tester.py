@@ -159,19 +159,28 @@ def test_context_length_binary_search(model_name, lower_bound_tokens=250, upper_
         # Show visual progress (testing in progress)
         update_search_visualization(iteration, mid_tokens, mid, current_low_tokens, current_high_tokens, lower_bound_tokens, upper_bound_tokens)
         
-        success, error_msg = test_single_context_length(model_name, mid, chars_per_token)
+        success, error_msg, usage_data = test_single_context_length(model_name, mid, chars_per_token)
+        
+        # Use actual token count if available, otherwise fall back to estimate
+        actual_tokens = mid_tokens
+        if usage_data and 'prompt_tokens' in usage_data:
+            actual_tokens = usage_data['prompt_tokens']
         
         # Update visualization with result
-        update_search_visualization(iteration, mid_tokens, mid, current_low_tokens, current_high_tokens, lower_bound_tokens, upper_bound_tokens, success)
+        update_search_visualization(iteration, actual_tokens, mid, current_low_tokens, current_high_tokens, lower_bound_tokens, upper_bound_tokens, success)
+        
+        # Show usage confirmation if available
+        if usage_data and success:
+            print(f"Actual: {usage_data['prompt_tokens']:,} tokens (est: {usage_data['estimated_tokens']:,})")
         
         # Note: Errors are silently handled - no persistent error messages
         
-        # Track search history
-        search_history.append((mid_tokens, success, False))
+        # Track search history with actual tokens
+        search_history.append((actual_tokens, success, False))
         
         if success:
             max_successful_length_chars = mid
-            max_successful_tokens = mid_tokens
+            max_successful_tokens = actual_tokens
             low = mid + 1
         else:
             high = mid - 1
@@ -200,7 +209,7 @@ def test_single_context_length(model_name, char_length, chars_per_token=4):
         chars_per_token (int): Estimated characters per token for token estimation
         
     Returns:
-        tuple: (bool, str or None) - Success status and error message if any
+        tuple: (bool, str or None, dict or None) - Success status, error message, and usage data
     """
     test_text = generate_test_text(char_length)
     estimated_tokens = count_tokens_estimate(test_text, chars_per_token)
@@ -223,10 +232,20 @@ def test_single_context_length(model_name, char_length, chars_per_token=4):
         )
         end_time = time.time()
         
-        return True, None
+        # Extract usage data if available
+        usage_data = None
+        if hasattr(response, 'usage') and response.usage:
+            usage_data = {
+                'prompt_tokens': response.usage.prompt_tokens,
+                'completion_tokens': response.usage.completion_tokens,
+                'total_tokens': response.usage.total_tokens,
+                'estimated_tokens': estimated_tokens
+            }
+        
+        return True, None, usage_data
         
     except Exception as e:
-        return False, str(e)
+        return False, str(e), None
     
 
 def parse_args():
