@@ -159,7 +159,7 @@ def test_context_length_binary_search(model_name, lower_bound_tokens=250, upper_
         # Show visual progress (testing in progress)
         update_search_visualization(iteration, mid_tokens, mid, current_low_tokens, current_high_tokens, lower_bound_tokens, upper_bound_tokens)
         
-        success, error_msg, usage_data = test_single_context_length(model_name, mid, chars_per_token)
+        success, error_msg, usage_data, truncated = test_single_context_length(model_name, mid, chars_per_token)
         
         # Use actual token count if available, otherwise fall back to estimate
         actual_tokens = mid_tokens
@@ -172,6 +172,17 @@ def test_context_length_binary_search(model_name, lower_bound_tokens=250, upper_
         # Show usage confirmation if available
         if usage_data and success:
             print(f"Actual: {usage_data['prompt_tokens']:,} tokens (est: {usage_data['estimated_tokens']:,})")
+        
+        # If truncation detected, stop the search and report the truncated token count
+        if truncated:
+            # Clear the current search line before showing final message
+            if _search_line_shown:
+                sys.stdout.write('\033[1A\033[K')
+                sys.stdout.flush()
+            print(f"Token truncation detected - context window limit: {actual_tokens:,} tokens")
+            max_successful_tokens = actual_tokens
+            max_successful_length_chars = mid
+            break
         
         # Note: Errors are silently handled - no persistent error messages
         
@@ -209,7 +220,7 @@ def test_single_context_length(model_name, char_length, chars_per_token=4):
         chars_per_token (int): Estimated characters per token for token estimation
         
     Returns:
-        tuple: (bool, str or None, dict or None) - Success status, error message, and usage data
+        tuple: (bool, str or None, dict or None, bool) - Success status, error message, usage data, and truncation flag
     """
     test_text = generate_test_text(char_length)
     estimated_tokens = count_tokens_estimate(test_text, chars_per_token)
@@ -234,6 +245,7 @@ def test_single_context_length(model_name, char_length, chars_per_token=4):
         
         # Extract usage data if available
         usage_data = None
+        truncated = False
         if hasattr(response, 'usage') and response.usage:
             usage_data = {
                 'prompt_tokens': response.usage.prompt_tokens,
@@ -241,11 +253,17 @@ def test_single_context_length(model_name, char_length, chars_per_token=4):
                 'total_tokens': response.usage.total_tokens,
                 'estimated_tokens': estimated_tokens
             }
+            
+            # Check for truncation: if actual tokens are significantly less than estimated
+            # (more than 10% difference), the API likely truncated the input
+            if usage_data['prompt_tokens'] < estimated_tokens * 0.9:
+                truncated = True
+                return False, "Token truncation detected", usage_data, truncated
         
-        return True, None, usage_data
+        return True, None, usage_data, False
         
     except Exception as e:
-        return False, str(e), None
+        return False, str(e), None, False
     
 
 def parse_args():
